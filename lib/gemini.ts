@@ -64,9 +64,9 @@ export async function generateExam(req: ExamRequest): Promise<ExamQuestion[]> {
           ง: '',
         },
         answer: 'ก',
-        reason: '',
-        bloom: '',
-        pisa: '',
+        reason: 'เหตุผล',
+        bloom: 'ความรู้ความจำ',
+        pisa: 'math literacy',
       },
     ]
   }
