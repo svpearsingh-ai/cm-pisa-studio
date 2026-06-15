@@ -63,7 +63,7 @@ export async function generateExam(req: ExamRequest): Promise<ExamQuestion[]> {
           ค: '',
           ง: '',
         },
-        answer: '',
+        answer: 'ก',
         reason: '',
         bloom: '',
         pisa: '',
