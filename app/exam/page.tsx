@@ -129,7 +129,7 @@ export default function ExamPage() {
                 <label style={{ display:'block', fontWeight:700, fontSize:14, marginBottom:10, color:'#374151' }}>จำนวนข้อ</label>
                 <select value={count} onChange={e => setCount(Number(e.target.value))}
                   style={{ width:'100%', padding:'10px 14px', borderRadius:10, border:'1.5px solid #E5E7EB', fontSize:14, background:'white' }}>
-                  {[3,5,8,10].map(n => <option key={n} value={n}>{n} ข้อ</option>)}
+                  {[1,3,5,8,10].map(n => <option key={n} value={n}>{n} ข้อ</option>)}
                 </select>
               </div>
             </div>
