@@ -1,0 +1,63 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { ragQuery } from '@/lib/rag'
+
+async function callGemini(prompt: string): Promise<string> {
+  const apiKey = process.env.GOOGLE_AI_API_KEY!
+  const url = `https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key=${apiKey}`
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }]
+    })
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error('Gemini error: ' + err)
+  }
+  const data = await res.json()
+  return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json()
+    const { subject = 'MAT', grade = 'p5', types = ['multiple choice'], context = '', difficulty = 'medium' } = body
+
+    const [pisaCtx, indCtx, exCtx] = await Promise.all([
+      ragQuery('PISA framework', { docType: 'pisa_framework', topK: 2 }),
+      ragQuery('indicator ' + subject, { subject, grade, docType: 'indicator', topK: 2 }),
+      ragQuery('exam example ' + subject, { subject, docType: 'exam_example', topK: 2 }),
+    ])
+
+    const ctx = [
+      pisaCtx.contextText && `=== PISA Framework ===\n${pisaCtx.contextText}`,
+      indCtx.contextText && `=== Indicators ===\n${indCtx.contextText}`,
+      exCtx.contextText && `=== Examples ===\n${exCtx.contextText}`,
+    ].filter(Boolean).join('\n\n')
+
+    const prompt = `You are a PISA exam expert for Thai students.
+${ctx ? `Use this knowledge:\n${ctx}\n\n---` : ''}
+Create 3 PISA-style exam questions for subject: ${subject}, grade: ${grade}, context: ${context || 'daily life'}, difficulty: ${difficulty}
+Respond with JSON array only, no markdown:
+[{"num":1,"situation":"...","question":"...","choices":{"a":"...","b":"...","c":"...","d":"..."},"answer":"a","reason":"...","bloom":"application","pisa":"math literacy"}]`
+
+    const text = await callGemini(prompt)
+    const clean = text.replace(/\`\`\`json\n?/g, '').replace(/\`\`\`\n?/g, '').trim()
+    const match = clean.match(/\[[\s\S]*\]/)
+    if (!match) throw new Error('No JSON found')
+
+    const questions = JSON.parse(match[0])
+    const sources = [...pisaCtx.sources, ...indCtx.sources, ...exCtx.sources]
+
+    return NextResponse.json({
+      success: true,
+      data: { questions, sources, rag_used: ctx.length > 0 }
+    })
+  } catch (e) {
+    return NextResponse.json({
+      success: false,
+      error: e instanceof Error ? e.message : 'error'
+    }, { status: 500 })
+  }
+}
