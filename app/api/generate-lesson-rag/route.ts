@@ -15,23 +15,25 @@ async function callGemini(prompt: string) {
   return data.candidates?.[0]?.content?.parts?.[0]?.text ?? ''
 }
 
-async function logActivity(token: string | null, payload: { subject: string; grade: string; detail: string }) {
+async function logUsage(token: string | null, payload: { subject: string; grade: string; topic: string }) {
   if (!token) return
   try {
     const db = createServerClient()
     const { data: userData, error: userErr } = await db.auth.getUser(token)
     if (userErr || !userData?.user) return
 
-    await db.from('activity_log').insert({
-      user_id: userData.user.id,
-      user_email: userData.user.email,
-      action_type: 'lesson',
+    const email = userData.user.email ?? ''
+
+    await db.from('usage_logs').insert({
+      teacher_id: email,
+      school_name: '',
       subject: payload.subject,
       grade: payload.grade,
-      detail: payload.detail,
+      action_type: 'lesson',
+      topic: payload.topic,
     })
   } catch (e) {
-    console.error('log activity failed:', e)
+    console.error('log usage failed:', e)
   }
 }
 
@@ -83,7 +85,7 @@ Respond with JSON object only, no markdown:
     const plan = JSON.parse(match[0])
     const sources = [...pisaCtx.sources, ...indCtx.sources, ...planCtx.sources, ...rubCtx.sources]
 
-    await logActivity(token, { subject, grade, detail: unit || 'ทั่วไป' })
+    await logUsage(token, { subject, grade, topic: unit || 'ทั่วไป' })
 
     return NextResponse.json({ success: true, data: { plan, sources, rag_used: ctx.length > 0 } })
   } catch (e) {
