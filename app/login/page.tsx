@@ -16,6 +16,15 @@ export default function LoginPage() {
     setLoading(true); setError('')
     // TODO Phase 3: await supabase.auth.signInWithPassword({ email, password })
     await new Promise(r => setTimeout(r, 1000))
+    await fetch('/api/log-login', {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({
+    email,
+    teacher_id: email,
+    school_name: '',
+  }),
+})
     router.push('/dashboard')
   }
 

@@ -1,5 +1,6 @@
 'use client'
 import { useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
 const SUBJECTS = [
   { value: 'READ', label: '📖 การอ่าน', color: '#EC4899', bg: '#FCE7F3', text: '#9D174D' },
@@ -74,9 +75,16 @@ export default function LessonPage() {
     if (!unit.trim()) { setError('กรุณาใส่หน่วยการเรียนรู้'); return }
     setLoading(true); setError(''); setPlan(null)
     try {
+      // ดึง token ของครูที่ login อยู่ เพื่อบันทึกสถิติการใช้งาน
+      const { data: sessionData } = await supabase.auth.getSession()
+      const token = sessionData?.session?.access_token
+
       const res = await fetch('/api/generate-lesson-rag', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
         body: JSON.stringify({ subject, grade, unit, indicator, time, context, methods, competencies }),
       })
       const data = await res.json()
