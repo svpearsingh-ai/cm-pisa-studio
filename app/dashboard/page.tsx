@@ -9,11 +9,16 @@ export default function DashboardPage() {
   const [teacherEmail, setTeacherEmail] = useState('')
   const [initial, setInitial] = useState('ค')
   const [showMenu, setShowMenu] = useState(false)
+  const [debugInfo, setDebugInfo] = useState('')
 
   useEffect(() => {
     async function loadUser() {
-      const { data } = await supabase.auth.getUser()
+      const { data, error } = await supabase.auth.getUser()
       const user = data?.user
+
+      // DEBUG: เก็บข้อมูลดิบไว้แสดงผล เพื่อหาสาเหตุที่ชื่อไม่ขึ้น
+      setDebugInfo(JSON.stringify({ error: error?.message, hasUser: !!user, metadata: user?.user_metadata, email: user?.email }, null, 2))
+
       if (!user) return
       const fullName = (user.user_metadata?.full_name as string) || ''
       setTeacherName(fullName)
@@ -29,7 +34,6 @@ export default function DashboardPage() {
     router.push('/login')
   }
 
-  // แสดงชื่อ ถ้ามี full_name ใช้เลย ถ้าไม่มีใช้ email แทน (เผื่อบัญชีที่ยังไม่มี metadata ครบ)
   const displayName = teacherName || teacherEmail
 
   return (
@@ -120,8 +124,12 @@ export default function DashboardPage() {
         <p style={{ textAlign:'center', color:'#CBD5E1', fontSize:12, marginTop:32 }}>
           AI ค้นคลังเอกสาร ศธจ.เชียงใหม่ · สอดคล้องตัวชี้วัด สพฐ.
         </p>
+
+        {/* DEBUG BLOCK - ลบทิ้งทีหลังได้ */}
+        <pre style={{ marginTop:32, padding:16, background:'#1E293B', color:'#94E2D5', fontSize:11, borderRadius:8, overflow:'auto', whiteSpace:'pre-wrap' }}>
+{debugInfo || 'กำลังโหลด...'}
+        </pre>
       </div>
     </div>
   )
 }
-// trigger redeploy
