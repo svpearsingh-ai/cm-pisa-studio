@@ -1,8 +1,26 @@
 'use client'
 import { useRouter } from 'next/navigation'
+import { useEffect, useState } from 'react'
+import { supabase } from '@/lib/supabase'
 
 export default function DashboardPage() {
   const router = useRouter()
+  const [teacherName, setTeacherName] = useState('')
+  const [initial, setInitial] = useState('ค')
+
+  useEffect(() => {
+    async function loadUser() {
+      const { data } = await supabase.auth.getUser()
+      const user = data?.user
+      if (!user) return
+      const fullName = (user.user_metadata?.full_name as string) || ''
+      setTeacherName(fullName)
+      // เอาตัวอักษรแรกของชื่อ (ข้ามคำนำหน้าเช่น นาง/นาย/นางสาว) มาทำ avatar
+      const cleaned = fullName.replace(/^(นางสาว|นาง|นาย|ผอ\.|ศน\.|ศธจ\.)/, '').trim()
+      setInitial(cleaned.charAt(0) || 'ค')
+    }
+    loadUser()
+  }, [])
 
   return (
     <div style={{ minHeight:'100vh', background:'#F8FAFC', fontFamily:'Sarabun,sans-serif' }}>
@@ -15,8 +33,13 @@ export default function DashboardPage() {
             <div style={{ color:'rgba(255,255,255,.6)', fontSize:11, marginTop:2 }}>ศธจ.เชียงใหม่</div>
           </div>
         </div>
-        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
-          <div style={{ width:34, height:34, borderRadius:'50%', background:'linear-gradient(135deg,#F59E0B,#D97706)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, color:'#1E40AF', cursor:'pointer', fontSize:14 }}>ค</div>
+        <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+          {teacherName && (
+            <span style={{ color:'white', fontSize:13, fontWeight:600 }}>
+              สวัสดี ครู{teacherName}
+            </span>
+          )}
+          <div style={{ width:34, height:34, borderRadius:'50%', background:'linear-gradient(135deg,#F59E0B,#D97706)', display:'flex', alignItems:'center', justifyContent:'center', fontWeight:700, color:'#1E40AF', cursor:'pointer', fontSize:14 }}>{initial}</div>
         </div>
       </div>
 
