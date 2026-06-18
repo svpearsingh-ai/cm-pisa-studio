@@ -42,3 +42,6 @@ next-env.d.ts
 *.mjs
 teachers*.csv
 speakers.csv
+*.mjs
+teachers*.csv
+speakers.csv
