@@ -2,6 +2,7 @@
 'use client'
 import { useState } from 'react'
 import { useRouter } from 'next/navigation'
+import { supabase } from '@/lib/supabase'
 
 export default function LoginPage() {
   const router = useRouter()
@@ -14,17 +15,35 @@ export default function LoginPage() {
     e.preventDefault()
     if (!email || !password) { setError('กรุณากรอกอีเมลและรหัสผ่าน'); return }
     setLoading(true); setError('')
-    // TODO Phase 3: await supabase.auth.signInWithPassword({ email, password })
-    await new Promise(r => setTimeout(r, 1000))
-    await fetch('/api/log-login', {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({
-    email,
-    teacher_id: email,
-    school_name: '',
-  }),
-})
+
+    // ล็อกอินจริงผ่าน Supabase Auth
+    const { data, error: authError } = await supabase.auth.signInWithPassword({
+      email,
+      password,
+    })
+
+    if (authError) {
+      setLoading(false)
+      setError('อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบอีกครั้ง')
+      return
+    }
+
+    // บันทึก log การ login (ไม่บล็อกการเข้าใช้งานถ้า log พลาด)
+    try {
+      await fetch('/api/log-login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email,
+          teacher_id: email,
+          school_name: data.user?.user_metadata?.school || '',
+        }),
+      })
+    } catch {
+      // log ล้มเหลวไม่เป็นไร ไม่ขัดขวางการเข้าใช้งาน
+    }
+
+    setLoading(false)
     router.push('/dashboard')
   }
 
