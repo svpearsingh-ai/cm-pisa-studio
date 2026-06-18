@@ -45,6 +45,12 @@ const CONTEXTS: Record<string, string[]> = {
   ],
 }
 
+function pad(n: number) { return n.toString().padStart(2, '0') }
+function timestampForFilename() {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
+}
+
 export default function ExamPage() {
   const [subject, setSubject]     = useState('MAT')
   const [grade, setGrade]         = useState('ป.5')
@@ -56,6 +62,7 @@ export default function ExamPage() {
   const [questions, setQuestions] = useState<any[]>([])
   const [sources, setSources]     = useState<string[]>([])
   const [error, setError]         = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const toggleType = (v: string) =>
     setTypes(t => t.includes(v) ? t.filter(x => x !== v) : [...t, v])
@@ -64,7 +71,6 @@ export default function ExamPage() {
     if (types.length === 0) { setError('กรุณาเลือกประเภทข้อสอบอย่างน้อย 1 ประเภท'); return }
     setLoading(true); setError(''); setQuestions([])
     try {
-      // ดึง token ของครูที่ login อยู่ เพื่อบันทึกสถิติการใช้งาน
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData?.session?.access_token
 
@@ -81,6 +87,132 @@ export default function ExamPage() {
       else setError(data.error)
     } catch { setError('เกิดข้อผิดพลาด กรุณาลองใหม่') }
     setLoading(false)
+  }
+
+  // สร้างไฟล์ .docx ในเบราว์เซอร์โดยตรง (ไม่ผ่าน server) แล้วสั่งดาวน์โหลดทันที
+  const handleDownloadDocx = async () => {
+    setDownloading(true)
+    try {
+      const {
+        Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel,
+        BorderStyle, ShadingType, WidthType, Table, TableRow, TableCell,
+      } = await import('docx')
+
+      const sub = SUBJECTS.find(s => s.value === subject)!
+      const subjectLabelClean = sub.label.replace(/^[^\s]+\s/, '') // ตัด emoji ออก
+
+      const children: any[] = []
+
+      // หัวกระดาษ
+      children.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: 'แบบทดสอบ PISAlike', bold: true, size: 32 })],
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: subjectLabelClean, size: 24, color: '475569' })],
+          spacing: { after: 80 },
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: `ระดับชั้น ${grade}  ·  จำนวน ${questions.length} ข้อ`, size: 22, color: '64748B' })],
+          spacing: { after: 80 },
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: 'สำนักงานศึกษาธิการจังหวัดเชียงใหม่ · CM PISA Studio', size: 18, color: '94A3B8' })],
+          spacing: { after: 300 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '2E75B6', space: 4 } },
+        }),
+        new Paragraph({
+          children: [new TextRun({ text: 'ชื่อ-สกุล: ......................................................  เลขที่: ............  ชั้น: ............', size: 22 })],
+          spacing: { after: 400 },
+        }),
+      )
+
+      questions.forEach((q: any) => {
+        children.push(
+          new Paragraph({
+            children: [new TextRun({ text: `ข้อที่ ${q.num}`, bold: true, size: 24, color: '1E40AF' })],
+            spacing: { before: 240, after: 120 },
+          })
+        )
+        if (q.situation) {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: q.situation, italics: true, size: 22, color: '374151' })],
+            spacing: { after: 160 },
+            border: { left: { style: BorderStyle.SINGLE, size: 12, color: 'CBD5E1', space: 8 } },
+          }))
+        }
+        children.push(new Paragraph({
+          children: [new TextRun({ text: q.question, bold: true, size: 24 })],
+          spacing: { after: 160 },
+        }))
+        if (q.choices) {
+          Object.entries(q.choices).forEach(([k, v]) => {
+            children.push(new Paragraph({
+              children: [new TextRun({ text: `${k.toUpperCase()}. ${v}`, size: 22 })],
+              spacing: { after: 80 },
+              indent: { left: 360 },
+            }))
+          })
+        }
+        children.push(new Paragraph({ text: '', spacing: { after: 200 } }))
+      })
+
+      // หน้าเฉลย — ขึ้นหน้าใหม่
+      const { PageBreak } = await import('docx')
+      children.push(new Paragraph({ children: [new PageBreak()] }))
+      children.push(new Paragraph({
+        alignment: AlignmentType.CENTER,
+        children: [new TextRun({ text: 'เฉลยและคำอธิบาย', bold: true, size: 30, color: '1E40AF' })],
+        spacing: { after: 300 },
+      }))
+
+      questions.forEach((q: any) => {
+        children.push(new Paragraph({
+          children: [
+            new TextRun({ text: `ข้อที่ ${q.num}`, bold: true, size: 22, color: '1E40AF' }),
+            new TextRun({ text: q.answer ? `   เฉลย: ${q.answer.toUpperCase()}` : '', bold: true, size: 22, color: '059669' }),
+          ],
+          spacing: { before: 200, after: 80 },
+        }))
+        if (q.reason) {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: q.reason, size: 21, color: '166534' })],
+            spacing: { after: 120 },
+          }))
+        }
+      })
+
+      const doc = new Document({
+        styles: { default: { document: { run: { font: 'Sarabun', size: 22 } } } },
+        sections: [{
+          properties: {
+            page: {
+              size: { width: 11906, height: 16838 }, // A4
+              margin: { top: 1134, right: 1134, bottom: 1134, left: 1134 },
+            },
+          },
+          children,
+        }],
+      })
+
+      const blob = await Packer.toBlob(doc)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `ข้อสอบ_${subject}_${timestampForFilename()}.docx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert('ไม่สามารถสร้างไฟล์ Word ได้ กรุณาลองใหม่')
+      console.error(e)
+    }
+    setDownloading(false)
   }
 
   const sub = SUBJECTS.find(s => s.value === subject)!
@@ -233,10 +365,17 @@ export default function ExamPage() {
                 {q.reason && <div style={{ background:'#F0FDF4', borderRadius:8, padding:'10px 14px', fontSize:13, color:'#166534' }}>💡 {q.reason}</div>}
               </div>
             ))}
-            <button onClick={() => window.print()}
-              style={{ width:'100%', padding:14, borderRadius:12, border:'2px solid #1E40AF', background:'white', color:'#1E40AF', fontSize:15, fontWeight:700, cursor:'pointer' }}>
-              🖨️ พิมพ์ข้อสอบ
-            </button>
+
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+              <button onClick={() => window.print()}
+                style={{ padding:14, borderRadius:12, border:'2px solid #1E40AF', background:'white', color:'#1E40AF', fontSize:15, fontWeight:700, cursor:'pointer' }}>
+                🖨️ พิมพ์ข้อสอบ
+              </button>
+              <button onClick={handleDownloadDocx} disabled={downloading}
+                style={{ padding:14, borderRadius:12, border:'none', background: downloading ? '#93C5FD' : 'linear-gradient(135deg,#1E40AF,#3B82F6)', color:'white', fontSize:15, fontWeight:700, cursor: downloading ? 'not-allowed' : 'pointer' }}>
+                {downloading ? '⏳ กำลังสร้างไฟล์...' : '📄 ดาวน์โหลด Word (.docx)'}
+              </button>
+            </div>
           </div>
         )}
       </div>

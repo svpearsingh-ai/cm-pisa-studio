@@ -27,7 +27,7 @@ async function logUsage(token: string | null, payload: { subject: string; grade:
 
     await db.from('usage_logs').insert({
       teacher_id: email,
-      school_name: '', // เติมอัตโนมัติถ้ามีข้อมูลโรงเรียนผูกกับ user ในอนาคต
+      school_name: '',
       subject: payload.subject,
       grade: payload.grade,
       action_type: 'exam',
@@ -38,12 +38,54 @@ async function logUsage(token: string | null, payload: { subject: string; grade:
   }
 }
 
+// บันทึกข้อสอบที่สร้างเสร็จลงตาราง exams — schema จริง: id, teacher_id(uuid), subject, grade, title, questions(jsonb), status, created_at
+// ไม่มีคอลัมน์แยกสำหรับ teacher_name/school_name/context/difficulty/types/sources จึงเก็บไว้ใน questions.meta แทน
+async function saveExamRecord(token: string | null, payload: {
+  subject: string; grade: string; context: string; difficulty: string;
+  types: string[]; questions: any[]; sources: string[];
+}) {
+  if (!token) return
+  try {
+    const db = createServerClient()
+    const { data: userData, error: userErr } = await db.auth.getUser(token)
+    if (userErr || !userData?.user) return
+
+    const user = userData.user
+    const teacherName = (user.user_metadata?.full_name as string) || user.email || ''
+    const school = (user.user_metadata?.school as string) || ''
+
+    // title สั้นๆอ่านง่าย เช่น "คณิตศาสตร์ ป.5 - ตลาด/การซื้อขาย"
+    const subjectThaiMap: Record<string, string> = { READ: 'การอ่าน', MAT: 'คณิตศาสตร์', SCI: 'วิทยาศาสตร์' }
+    const title = `${subjectThaiMap[payload.subject] || payload.subject} ${payload.grade} - ${payload.context || 'ทั่วไป'}`
+
+    await db.from('exams').insert({
+      teacher_id: user.id, // uuid ของ Supabase Auth user ไม่ใช่ email
+      subject: payload.subject,
+      grade: payload.grade,
+      title,
+      questions: {
+        items: payload.questions,        // ข้อสอบเต็มทุกข้อ พร้อมเฉลย/เหตุผล
+        meta: {
+          teacher_name: teacherName,
+          school_name: school,
+          context: payload.context,
+          difficulty: payload.difficulty,
+          types: payload.types,
+          sources: payload.sources,
+        },
+      },
+      status: 'completed',
+    })
+  } catch (e) {
+    console.error('save exam record failed:', e)
+  }
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
     const { subject = 'MAT', grade = 'p5', types = ['multiple choice'], context = '', difficulty = 'medium', count = 3 } = body
 
-    // ดึง token จาก Authorization header (ส่งมาจาก frontend)
     const authHeader = request.headers.get('authorization')
     const token = authHeader?.replace('Bearer ', '') ?? null
 
@@ -73,8 +115,11 @@ Respond with JSON array only, no markdown:
     const questions = JSON.parse(match[0])
     const sources = [...pisaCtx.sources, ...indCtx.sources, ...exCtx.sources]
 
-    // บันทึกสถิติการใช้งาน (ไม่ block response ถ้าพลาด)
-    await logUsage(token, { subject, grade, topic: context || 'ทั่วไป' })
+    // บันทึกสถิติการใช้งาน + บันทึกข้อสอบเข้าคลังประวัติ (ทำพร้อมกัน ไม่ block response ถ้าพลาด)
+    await Promise.all([
+      logUsage(token, { subject, grade, topic: context || 'ทั่วไป' }),
+      saveExamRecord(token, { subject, grade, context: context || 'ทั่วไป', difficulty, types, questions, sources }),
+    ])
 
     return NextResponse.json({
       success: true,
