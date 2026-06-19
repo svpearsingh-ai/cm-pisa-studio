@@ -50,6 +50,12 @@ const CONTEXTS: Record<string, string[]> = {
   SCI:  ['น้ำดื่ม/คุณภาพน้ำ','พลังงานทดแทน','ระบบนิเวศ','สภาพอากาศ','สุขภาพ'],
 }
 
+function pad(n: number) { return n.toString().padStart(2, '0') }
+function timestampForFilename() {
+  const d = new Date()
+  return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}`
+}
+
 export default function LessonPage() {
   const [subject, setSubject]         = useState('MAT')
   const [grade, setGrade]             = useState('ป.5')
@@ -63,6 +69,7 @@ export default function LessonPage() {
   const [plan, setPlan]               = useState<any>(null)
   const [sources, setSources]         = useState<string[]>([])
   const [error, setError]             = useState('')
+  const [downloading, setDownloading] = useState(false)
 
   const toggleMethod = (v: string) =>
     setMethods(m => m.includes(v) ? m.filter(x => x !== v) : [...m, v])
@@ -75,7 +82,6 @@ export default function LessonPage() {
     if (!unit.trim()) { setError('กรุณาใส่หน่วยการเรียนรู้'); return }
     setLoading(true); setError(''); setPlan(null)
     try {
-      // ดึง token ของครูที่ login อยู่ เพื่อบันทึกสถิติการใช้งาน
       const { data: sessionData } = await supabase.auth.getSession()
       const token = sessionData?.session?.access_token
 
@@ -94,6 +100,147 @@ export default function LessonPage() {
     setLoading(false)
   }
 
+  // สร้างไฟล์ .docx ในเบราว์เซอร์โดยตรง แล้วสั่งดาวน์โหลดทันที
+  const handleDownloadDocx = async () => {
+    if (!plan) return
+    setDownloading(true)
+    try {
+      const {
+        Document, Packer, Paragraph, TextRun, AlignmentType,
+        BorderStyle, ShadingType, WidthType, Table, TableRow, TableCell,
+      } = await import('docx')
+
+      const children: any[] = []
+
+      // หัวกระดาษ
+      children.push(
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: plan.title || 'แผนการจัดการเรียนรู้', bold: true, size: 30, color: '1E40AF' })],
+          spacing: { after: 80 },
+        }),
+        new Paragraph({
+          alignment: AlignmentType.CENTER,
+          children: [new TextRun({ text: `${plan.subject || subject}  ·  ${plan.level || grade}  ·  ${plan.time || time}`, size: 22, color: '475569' })],
+          spacing: { after: 200 },
+          border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: '2E75B6', space: 4 } },
+        }),
+      )
+
+      const heading = (text: string) => new Paragraph({
+        children: [new TextRun({ text, bold: true, size: 26, color: '1E40AF' })],
+        spacing: { before: 280, after: 120 },
+      })
+      const body = (text: string) => new Paragraph({
+        children: [new TextRun({ text, size: 22 })],
+        spacing: { after: 100 },
+      })
+
+      children.push(heading('1. สาระสำคัญ'), body(plan.core_concept || ''))
+
+      children.push(heading('2. จุดประสงค์การเรียนรู้'))
+      ;(plan.objectives || []).forEach((o: string, i: number) => {
+        children.push(body(`${i + 1}. ${o}`))
+      })
+
+      if (plan.indicators?.length) {
+        children.push(heading('3. มาตรฐาน/ตัวชี้วัด'))
+        plan.indicators.forEach((ind: string) => children.push(body(`• ${ind}`)))
+      }
+
+      if (plan.media_materials?.length) {
+        children.push(heading('4. สื่อและวัสดุอุปกรณ์'))
+        plan.media_materials.forEach((m: string) => children.push(body(`• ${m}`)))
+      }
+
+      children.push(heading('5. สถานการณ์นำแบบ PISA'), body(plan.pisa_situation || ''))
+
+      children.push(heading('6. กิจกรรมการเรียนรู้'))
+      ;(plan.activities || []).forEach((a: any) => {
+        children.push(new Paragraph({
+          children: [new TextRun({ text: a.step, bold: true, size: 22, color: '374151' })],
+          spacing: { before: 100, after: 40 },
+        }))
+        children.push(body(a.desc))
+      })
+
+      children.push(heading('7. คำถามกระตุ้นการคิด'))
+      ;(plan.guiding_questions || []).forEach((q: string, i: number) => {
+        children.push(body(`Q${i + 1}. ${q}`))
+      })
+
+      children.push(heading('8. ชิ้นงาน/ใบงาน'), body(plan.worksheet || ''))
+
+      // การวัดและประเมินผล แบบจับคู่จุดประสงค์
+      children.push(heading('9. การวัดและประเมินผล (อ้างอิงจุดประสงค์การเรียนรู้)'))
+      const aboList = plan.assessment_by_objective || []
+      if (aboList.length > 0) {
+        const headerRow = new TableRow({
+          tableHeader: true,
+          children: [
+            ['จุดประสงค์', 2400], ['วิธีการ', 1600], ['เครื่องมือ', 1700], ['เกณฑ์', 2300],
+          ].map(([t, w]) => new TableCell({
+            width: { size: w as number, type: WidthType.DXA },
+            shading: { fill: '1E40AF', type: ShadingType.CLEAR },
+            margins: { top: 80, bottom: 80, left: 100, right: 100 },
+            children: [new Paragraph({ alignment: AlignmentType.CENTER, children: [new TextRun({ text: t as string, bold: true, color: 'FFFFFF', size: 20 })] })],
+          })),
+        })
+        const dataRows = aboList.map((item: any) => new TableRow({
+          children: [item.objective, item.method, item.tool, item.criteria].map((val, idx) => new TableCell({
+            width: { size: [2400, 1600, 1700, 2300][idx], type: WidthType.DXA },
+            margins: { top: 60, bottom: 60, left: 100, right: 100 },
+            children: [new Paragraph({ children: [new TextRun({ text: String(val || ''), size: 20 })] })],
+          })),
+        }))
+        children.push(new Table({ width: { size: 8000, type: WidthType.DXA }, rows: [headerRow, ...dataRows] }))
+      } else {
+        children.push(body(plan.assessment || ''))
+      }
+
+      if (plan.rubric?.length) {
+        children.push(heading('10. เกณฑ์การประเมินโดยรวม (Rubric)'))
+        plan.rubric.forEach((r: any) => {
+          children.push(new Paragraph({
+            children: [new TextRun({ text: `${r.level}: `, bold: true, size: 22 }), new TextRun({ text: r.criteria, size: 22 })],
+            spacing: { after: 80 },
+          }))
+        })
+      }
+
+      if (plan.teacher_notes) {
+        children.push(heading('11. ข้อเสนอแนะสำหรับครู'), body(plan.teacher_notes))
+      }
+
+      const doc = new Document({
+        styles: { default: { document: { run: { font: 'Sarabun', size: 22 } } } },
+        sections: [{
+          properties: {
+            page: {
+              size: { width: 11906, height: 16838 },
+              margin: { top: 1134, right: 1134, bottom: 1134, left: 1134 },
+            },
+          },
+          children,
+        }],
+      })
+
+      const blob = await Packer.toBlob(doc)
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `แผนการสอน_${subject}_${timestampForFilename()}.docx`
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      alert('ไม่สามารถสร้างไฟล์ Word ได้ กรุณาลองใหม่')
+      console.error(e)
+    }
+    setDownloading(false)
+  }
+
   return (
     <div style={{ minHeight:'100vh', background:'#F8FAFC', fontFamily:'Sarabun,sans-serif' }}>
       {/* Header */}
@@ -107,7 +254,7 @@ export default function LessonPage() {
         <div style={{ background:'white', borderRadius:16, boxShadow:'0 2px 12px rgba(0,0,0,.08)', overflow:'hidden' }}>
           <div style={{ background:'linear-gradient(135deg,#1E40AF,#3B82F6)', padding:'24px 28px' }}>
             <h1 style={{ color:'white', fontSize:22, fontWeight:700, margin:0 }}>📚 สร้างแผนการจัดการเรียนรู้ตามแนว PISA</h1>
-            <p style={{ color:'rgba(255,255,255,.75)', fontSize:14, margin:'6px 0 0' }}>ครบ 10 องค์ประกอบ · สอดคล้องตัวชี้วัด สพฐ. · บูรณาการสมรรถนะ PISA</p>
+            <p style={{ color:'rgba(255,255,255,.75)', fontSize:14, margin:'6px 0 0' }}>ครบ 11 องค์ประกอบ · สอดคล้องตัวชี้วัด สพฐ. · บูรณาการสมรรถนะ PISA</p>
           </div>
 
           <div style={{ padding:28 }}>
@@ -253,7 +400,7 @@ export default function LessonPage() {
                 </Section>
 
                 {/* ตัวชี้วัด */}
-                {plan.indicators && (
+                {plan.indicators && plan.indicators.length > 0 && (
                   <Section title="3. มาตรฐาน/ตัวชี้วัด" color={sub.color}>
                     {plan.indicators.map((ind: string, i: number) => (
                       <div key={i} style={{ fontSize:14, color:'#374151', padding:'4px 0', borderBottom:'1px solid #F1F5F9' }}>🎯 {ind}</div>
@@ -261,15 +408,28 @@ export default function LessonPage() {
                   </Section>
                 )}
 
+                {/* สื่อและวัสดุอุปกรณ์ — ใหม่ */}
+                {plan.media_materials && plan.media_materials.length > 0 && (
+                  <Section title="4. สื่อและวัสดุอุปกรณ์" color={sub.color}>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                      {plan.media_materials.map((m: string, i: number) => (
+                        <span key={i} style={{ background:'#F1F5F9', color:'#334155', fontSize:13, padding:'6px 14px', borderRadius:20, border:'1px solid #E2E8F0' }}>
+                          🧰 {m}
+                        </span>
+                      ))}
+                    </div>
+                  </Section>
+                )}
+
                 {/* สถานการณ์นำ PISA */}
-                <Section title="4. สถานการณ์นำแบบ PISA" color={sub.color}>
+                <Section title="5. สถานการณ์นำแบบ PISA" color={sub.color}>
                   <div style={{ background:'#F8FAFC', borderRadius:10, padding:'14px 16px', fontSize:14, lineHeight:1.9, color:'#374151', borderLeft:`4px solid ${sub.color}` }}>
                     {plan.pisa_situation}
                   </div>
                 </Section>
 
                 {/* กิจกรรม */}
-                <Section title="5. กิจกรรมการเรียนรู้" color={sub.color}>
+                <Section title="6. กิจกรรมการเรียนรู้" color={sub.color}>
                   {plan.activities?.map((a: any, i: number) => (
                     <div key={i} style={{ marginBottom:14, padding:'14px 16px', background:'#F8FAFC', borderRadius:10 }}>
                       <div style={{ fontWeight:700, fontSize:14, color:sub.text, marginBottom:8 }}>{a.step}</div>
@@ -279,7 +439,7 @@ export default function LessonPage() {
                 </Section>
 
                 {/* คำถามกระตุ้น */}
-                <Section title="6. คำถามกระตุ้นการคิด" color={sub.color}>
+                <Section title="7. คำถามกระตุ้นการคิด" color={sub.color}>
                   {plan.guiding_questions?.map((q: string, i: number) => (
                     <div key={i} style={{ display:'flex', gap:10, marginBottom:8 }}>
                       <span style={{ color:sub.color, fontWeight:700 }}>Q{i+1}.</span>
@@ -289,18 +449,43 @@ export default function LessonPage() {
                 </Section>
 
                 {/* ใบงาน */}
-                <Section title="7. ชิ้นงาน/ใบงาน" color={sub.color}>
+                <Section title="8. ชิ้นงาน/ใบงาน" color={sub.color}>
                   <p style={{ margin:0, fontSize:14, lineHeight:1.8, color:'#374151' }}>{plan.worksheet}</p>
                 </Section>
 
-                {/* การวัดผล */}
-                <Section title="8. การวัดและประเมินผล" color={sub.color}>
-                  <p style={{ margin:0, fontSize:14, lineHeight:1.8, color:'#374151' }}>{plan.assessment}</p>
+                {/* การวัดผล — ยึดจุดประสงค์เป็นหลัก */}
+                <Section title="9. การวัดและประเมินผล (อ้างอิงจุดประสงค์การเรียนรู้)" color={sub.color}>
+                  {plan.assessment_by_objective && plan.assessment_by_objective.length > 0 ? (
+                    <div style={{ overflowX:'auto' }}>
+                      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:13 }}>
+                        <thead>
+                          <tr style={{ background:sub.bg }}>
+                            <th style={{ padding:'10px 12px', textAlign:'left', color:sub.text, fontWeight:700, borderBottom:`2px solid ${sub.color}` }}>จุดประสงค์</th>
+                            <th style={{ padding:'10px 12px', textAlign:'left', color:sub.text, fontWeight:700, borderBottom:`2px solid ${sub.color}` }}>วิธีการ</th>
+                            <th style={{ padding:'10px 12px', textAlign:'left', color:sub.text, fontWeight:700, borderBottom:`2px solid ${sub.color}` }}>เครื่องมือ</th>
+                            <th style={{ padding:'10px 12px', textAlign:'left', color:sub.text, fontWeight:700, borderBottom:`2px solid ${sub.color}` }}>เกณฑ์</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {plan.assessment_by_objective.map((item: any, i: number) => (
+                            <tr key={i} style={{ borderBottom:'1px solid #F1F5F9' }}>
+                              <td style={{ padding:'10px 12px', color:'#374151', lineHeight:1.6 }}>{item.objective}</td>
+                              <td style={{ padding:'10px 12px', color:'#374151', lineHeight:1.6 }}>{item.method}</td>
+                              <td style={{ padding:'10px 12px', color:'#374151', lineHeight:1.6 }}>{item.tool}</td>
+                              <td style={{ padding:'10px 12px', color:'#374151', lineHeight:1.6 }}>{item.criteria}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <p style={{ margin:0, fontSize:14, lineHeight:1.8, color:'#374151' }}>{plan.assessment}</p>
+                  )}
                 </Section>
 
                 {/* Rubric */}
-                {plan.rubric && (
-                  <Section title="9. เกณฑ์การประเมิน (Rubric)" color={sub.color}>
+                {plan.rubric && plan.rubric.length > 0 && (
+                  <Section title="10. เกณฑ์การประเมินโดยรวม (Rubric)" color={sub.color}>
                     <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:10 }}>
                       {plan.rubric.map((r: any, i: number) => (
                         <div key={i} style={{ padding:'12px 14px', borderRadius:10, background: i===0 ? '#DCFCE7' : i===1 ? '#DBEAFE' : i===2 ? '#FEF3C7' : '#FEE2E2', border:`1px solid ${i===0 ? '#A7F3D0' : i===1 ? '#BFDBFE' : i===2 ? '#FDE68A' : '#FECACA'}` }}>
@@ -314,7 +499,7 @@ export default function LessonPage() {
 
                 {/* หมายเหตุครู */}
                 {plan.teacher_notes && (
-                  <Section title="10. ข้อเสนอแนะสำหรับครู" color={sub.color}>
+                  <Section title="11. ข้อเสนอแนะสำหรับครู" color={sub.color}>
                     <div style={{ background:'#FFFBEB', borderRadius:10, padding:'14px 16px', fontSize:14, lineHeight:1.8, color:'#92400E', border:'1px solid #FDE68A' }}>
                       💡 {plan.teacher_notes}
                     </div>
@@ -323,10 +508,16 @@ export default function LessonPage() {
               </div>
             </div>
 
-            <button onClick={() => window.print()}
-              style={{ width:'100%', padding:14, borderRadius:12, border:'2px solid #1E40AF', background:'white', color:'#1E40AF', fontSize:15, fontWeight:700, cursor:'pointer', marginTop:16 }}>
-              🖨️ พิมพ์แผนการสอน
-            </button>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginTop:16 }}>
+              <button onClick={() => window.print()}
+                style={{ padding:14, borderRadius:12, border:'2px solid #1E40AF', background:'white', color:'#1E40AF', fontSize:15, fontWeight:700, cursor:'pointer' }}>
+                🖨️ พิมพ์แผนการสอน
+              </button>
+              <button onClick={handleDownloadDocx} disabled={downloading}
+                style={{ padding:14, borderRadius:12, border:'none', background: downloading ? '#93C5FD' : 'linear-gradient(135deg,#1E40AF,#3B82F6)', color:'white', fontSize:15, fontWeight:700, cursor: downloading ? 'not-allowed' : 'pointer' }}>
+                {downloading ? '⏳ กำลังสร้างไฟล์...' : '📄 ดาวน์โหลด Word (.docx)'}
+              </button>
+            </div>
           </div>
         )}
       </div>
