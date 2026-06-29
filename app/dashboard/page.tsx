@@ -16,7 +16,6 @@ export default function DashboardPage() {
       const user = data?.user
       if (!user) return
       const fullName = (user.user_metadata?.full_name as string) || ''
-      // ตัดคำนำหน้าออก เพื่อใช้แสดงทั้งคำทักทายและตัวอักษรย่อ
       const cleaned = fullName.replace(/^(นางสาว|นาง|นาย|ผอ\.|ศน\.|ศธจ\.)/, '').trim()
       setTeacherName(cleaned)
       setTeacherEmail(user.email || '')
@@ -55,13 +54,17 @@ export default function DashboardPage() {
           </div>
 
           {showMenu && (
-            <div style={{ position:'absolute', top:46, right:0, background:'white', borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,.15)', minWidth:180, overflow:'hidden', zIndex:50 }}>
+            <div style={{ position:'absolute', top:46, right:0, background:'white', borderRadius:10, boxShadow:'0 8px 24px rgba(0,0,0,.15)', minWidth:200, overflow:'hidden', zIndex:50 }}>
               <div style={{ padding:'12px 16px', borderBottom:'1px solid #F1F5F9' }}>
                 <div style={{ fontSize:13, fontWeight:700, color:'#0F172A' }}>{displayName || 'ผู้ใช้งาน'}</div>
                 <div style={{ fontSize:11, color:'#94A3B8', marginTop:2 }}>{teacherEmail}</div>
               </div>
+              <button onClick={() => { setShowMenu(false); router.push('/change-password') }}
+                style={{ width:'100%', padding:'12px 16px', border:'none', background:'white', color:'#374151', fontSize:14, fontWeight:600, textAlign:'left', cursor:'pointer' }}>
+                🔑 เปลี่ยนรหัสผ่าน
+              </button>
               <button onClick={handleLogout}
-                style={{ width:'100%', padding:'12px 16px', border:'none', background:'white', color:'#DC2626', fontSize:14, fontWeight:600, textAlign:'left', cursor:'pointer' }}>
+                style={{ width:'100%', padding:'12px 16px', border:'none', background:'white', color:'#DC2626', fontSize:14, fontWeight:600, textAlign:'left', cursor:'pointer', borderTop:'1px solid #F1F5F9' }}>
                 🚪 ออกจากระบบ
               </button>
             </div>
